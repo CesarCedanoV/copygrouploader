@@ -3,96 +3,141 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 	"strings"
+	"time"
 
+	"git.tredium.com/scm/copygrouploader/models"
 	"github.com/tealeg/xlsx"
 )
 
 func main() {
-	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDEzOjU0OjUw"
 
-	excelFileName := "groups_to_copy.xlsx"
+	response := LoaderResponse{}
+
+	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE2OjI3OjEx"
+
+	excelFileName := "groups_to_copy_cesar.xlsx"
 	xlFile, err := xlsx.OpenFile(excelFileName)
 	if err != nil {
-		fmt.Println("Error:", err)
+		log.Fatalln(err)
 	}
-	existing_group_num := ""
 
 	for _, sheet := range xlFile.Sheets {
 
-		existing_group_num = strings.Trim(sheet.Rows[1].Cells[0].Value, " ")
-		for _, row := range sheet.Rows {
-			dto := map[string]interface{}{
-				"group_num":  strings.Trim(row.Cells[1].Value, " "),
-				"group_name": strings.Trim(row.Cells[2].Value, " "),
-				"start_date": strings.Trim(row.Cells[3].Value, " "),
-				"udf":        strings.Trim(row.Cells[4].Value, " "),
+		existing_group_num := strings.Trim(sheet.Rows[1].Cells[0].Value, " ")
+
+		existingGroup, err := GetGroupsByQuery(existing_group_num, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		fmt.Println(existingGroup)
+
+		for key, row := range sheet.Rows {
+			// Omit first row about the Table Headers
+			if key == 0 {
+				continue
 			}
 
-			group, _ := json.Marshal(dto)
+			newGroup := existingGroup
+			newGroup.GroupNum = strings.Trim(row.Cells[1].Value, " ")
+			newGroup.GroupName = strings.Trim(row.Cells[2].Value, " ")
+			start_date, err := time.Parse("20060102", strings.Trim(row.Cells[3].Value, " "))
+			if err != nil {
+				response.RowsFailed = append(response.RowsFailed, int64(key+1))
+				response.TotalFailed++
+				fmt.Println("In row:", (key + 1), "Error", err)
+				continue
+			}
+			newGroup.StartDate = start_date
 
-			fmt.Printf("%s\n", group)
+			err = AddGroup(*newGroup, currentToken)
+			if err != nil {
+				response.RowsFailed = append(response.RowsFailed, int64(key+1))
+				response.TotalFailed++
+				fmt.Println("In row:", (key + 1), "Error:", err)
+				continue
+			}
+
+			response.RowsAdded = append(response.RowsAdded, int64(key+1))
+			response.TotalAdded++
 
 		}
 	}
-
-	GetGroupsByQuery(existing_group_num, currentToken)
-
-	query_groups_endpoint := "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/query"
-	fmt.Println(query_groups_endpoint)
-
-	copy_groups_endpoint := "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/copy"
-	fmt.Println(copy_groups_endpoint)
-
 }
 
-func GetGroupsByQuery(existing_group_num string, currentToken string) {
+func GetGroupsByQuery(existing_group_num string, currentToken string) (*models.Groups, error) {
 
 	client := &http.Client{}
 	dto, _ := json.Marshal(map[string]interface{}{"groups_group_num": existing_group_num})
-	fmt.Println(string(dto))
 	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/query", bytes.NewReader(dto))
 	if err != nil {
-		os.Exit(1)
+		return nil, err
 	}
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", currentToken)
 	resp, err := client.Do(req)
-	// defer resp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
 
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err2 := ioutil.ReadAll(resp.Body)
-		if err2 != nil {
-			log.Fatalln(err2)
-		}
-		bodyString := string(bodyBytes)
-		fmt.Println(bodyString)
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
 	}
-
-	// group, _ := json.Marshal(map[string]interface{}{"groups_group_num": existing_group_num})
-	// resp, err := http.Post("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/query", "application/json", bytes.NewBuffer(group))
-	// if err != nil {
-	// 	log.Fatalln(err)
-	// }
-
-	// body, err := ioutil.ReadAll(resp.Body)
-	// if err != nil {
-	// 	log.Fatalln(err)
-	// }
-
-	// log.Println(string(body))
-}
-	modifyDTO := new(models.ModifyGroupsPlanListsDTO)
-	err = json.Unmarshal(bodyData, modifyDTO)
+	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		errResponse := liberror.NewAppError("Error parsing json.", applicationContext+err.Error())
-		libhttp.EncodeErrorResponse(w, errResponse, http.StatusBadRequest)
-		return
+		log.Fatalln(err)
+		return nil, err
 	}
+	existingGroups := make([]models.Groups, 0)
+	err = json.Unmarshal(bodyData, &existingGroups)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return &existingGroups[0], nil
+}
+
+func AddGroup(group models.Groups, currentToken string) error {
+
+	client := &http.Client{}
+	dto, _ := json.Marshal(group)
+	fmt.Println(string(dto))
+	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/", bytes.NewReader(dto))
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return err
+	}
+	fmt.Println(string(bodyData))
+
+	return nil
+}
+
+type LoaderResponse struct {
+	RowsAdded   []int64
+	TotalAdded  int64
+	RowsFailed  []int64
+	TotalFailed int64
+}
