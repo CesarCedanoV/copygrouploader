@@ -19,9 +19,9 @@ func main() {
 
 	response := LoaderResponse{}
 
-	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE4OjA0OjEx"
+	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE5OjUzOjMw"
 
-	excelFileName := "groups_to_copy_cesar.xlsx"
+	excelFileName := "groups_to_copy.xlsx"
 	xlFile, err := xlsx.OpenFile(excelFileName)
 	if err != nil {
 		log.Fatalln(err)
@@ -29,13 +29,12 @@ func main() {
 
 	for _, sheet := range xlFile.Sheets {
 
-		existing_group_num := strings.Trim(sheet.Rows[1].Cells[0].Value, " ")
+		existingGroupNum := strings.Trim(sheet.Rows[1].Cells[0].Value, " ")
 
-		existingGroup, err := GetGroupsByQuery(existing_group_num, currentToken)
+		existingGroup, err := GetGroupsByQuery(existingGroupNum, currentToken)
 		if err != nil {
 			log.Fatalln(err)
 		}
-
 		existingGroup.GroupsLocation, err = GetGroupsLocation(existingGroup.Id, currentToken)
 		if err != nil {
 			log.Fatalln(err)
@@ -69,8 +68,6 @@ func main() {
 			log.Fatalln(err)
 		}
 
-		fmt.Println(existingGroup)
-
 		for key, row := range sheet.Rows {
 			// Omit first row about the Table Headers
 			if key == 0 {
@@ -84,7 +81,7 @@ func main() {
 			if err != nil {
 				response.RowsFailed = append(response.RowsFailed, int64(key+1))
 				response.TotalFailed++
-				fmt.Println("In row:", (key + 1), "Error", err)
+				fmt.Println("In row:", (key + 1), "TimeParse Error:", err)
 				continue
 			}
 			newGroup.StartDate = start_date
@@ -93,7 +90,7 @@ func main() {
 			if err != nil {
 				response.RowsFailed = append(response.RowsFailed, int64(key+1))
 				response.TotalFailed++
-				fmt.Println("In row:", (key + 1), "Error:", err)
+				fmt.Println("In row:", (key + 1), err)
 				continue
 			}
 
@@ -102,12 +99,13 @@ func main() {
 
 		}
 	}
+	log.Println("Response:", response)
 }
 
-func GetGroupsByQuery(existing_group_num string, currentToken string) (*models.Groups, error) {
+func GetGroupsByQuery(existingGroupNum string, currentToken string) (*models.Groups, error) {
 
 	client := &http.Client{}
-	dto, _ := json.Marshal(map[string]interface{}{"groups_group_num": existing_group_num})
+	dto, _ := json.Marshal(map[string]interface{}{"groups_group_num": existingGroupNum})
 	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/query", bytes.NewReader(dto))
 	if err != nil {
 		return nil, err
@@ -121,7 +119,8 @@ func GetGroupsByQuery(existing_group_num string, currentToken string) (*models.G
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupByQuery Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -135,14 +134,20 @@ func GetGroupsByQuery(existing_group_num string, currentToken string) (*models.G
 		return nil, err
 	}
 
-	return &existingGroups[0], nil
+	if len(existingGroups) > 0 {
+		for _, group := range existingGroups {
+			if strings.ToUpper(group.GroupNum) == strings.ToUpper(existingGroupNum) {
+				return &group, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 func AddGroup(group models.Groups, currentToken string) error {
 
 	client := &http.Client{}
 	dto, _ := json.Marshal(group)
-	fmt.Println(string(dto))
 	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/", bytes.NewReader(dto))
 	if err != nil {
 		return err
@@ -156,7 +161,8 @@ func AddGroup(group models.Groups, currentToken string) error {
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
-		return errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return errors.New(fmt.Sprintf("AddGroup Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -175,7 +181,7 @@ type LoaderResponse struct {
 	TotalFailed int64
 }
 
-func GetGroupsLocation(existingGroupId int64, currentToken string) ([]*models.GroupsLocation, error) {
+func GetGroupsLocation(existingGroupId int64, currentToken string) (items []*models.GroupsLocation, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupslocation", existingGroupId), nil)
@@ -191,14 +197,17 @@ func GetGroupsLocation(existingGroupId int64, currentToken string) ([]*models.Gr
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsLocation Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsLocation, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -208,7 +217,7 @@ func GetGroupsLocation(existingGroupId int64, currentToken string) ([]*models.Gr
 	return items, nil
 }
 
-func GetGroupsPlanList(existingGroupId int64, currentToken string) ([]*models.GroupsPlanList, error) {
+func GetGroupsPlanList(existingGroupId int64, currentToken string) (items []*models.GroupsPlanList, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsplanlist", existingGroupId), nil)
@@ -224,14 +233,17 @@ func GetGroupsPlanList(existingGroupId int64, currentToken string) ([]*models.Gr
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsPlanList Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsPlanList, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -241,7 +253,7 @@ func GetGroupsPlanList(existingGroupId int64, currentToken string) ([]*models.Gr
 	return items, nil
 }
 
-func GetGroupsPriorAuth(existingGroupId int64, currentToken string) ([]*models.GroupsPriorAuth, error) {
+func GetGroupsPriorAuth(existingGroupId int64, currentToken string) (items []*models.GroupsPriorAuth, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupspriorauth", existingGroupId), nil)
@@ -257,14 +269,17 @@ func GetGroupsPriorAuth(existingGroupId int64, currentToken string) ([]*models.G
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsPriorAuth Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsPriorAuth, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -274,7 +289,7 @@ func GetGroupsPriorAuth(existingGroupId int64, currentToken string) ([]*models.G
 	return items, nil
 }
 
-func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) ([]*models.GroupsDedCapMgmt, error) {
+func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) (items []*models.GroupsDedCapMgmt, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdedcapmgmt", existingGroupId), nil)
@@ -290,14 +305,17 @@ func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) ([]*models.
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsDedCapMgmt Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsDedCapMgmt, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -307,7 +325,7 @@ func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) ([]*models.
 	return items, nil
 }
 
-func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) ([]*models.GroupsClaimAdminList, error) {
+func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) (items []*models.GroupsClaimAdminList, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminlist", existingGroupId), nil)
@@ -323,14 +341,17 @@ func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) ([]*mod
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsClaimAdminList Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsClaimAdminList, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -340,7 +361,7 @@ func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) ([]*mod
 	return items, nil
 }
 
-func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) ([]*models.GroupsClaimAdminFeeList, error) {
+func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) (items []*models.GroupsClaimAdminFeeList, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminfeelist", existingGroupId), nil)
@@ -356,14 +377,17 @@ func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) ([]*
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsClaimAdminFeeList Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsClaimAdminFeeList, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -373,7 +397,7 @@ func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) ([]*
 	return items, nil
 }
 
-func GetGroupsSubPlan(existingGroupId int64, currentToken string) ([]*models.GroupsSubPlan, error) {
+func GetGroupsSubPlan(existingGroupId int64, currentToken string) (items []*models.GroupsSubPlan, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupssubplan", existingGroupId), nil)
@@ -389,14 +413,17 @@ func GetGroupsSubPlan(existingGroupId int64, currentToken string) ([]*models.Gro
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsSubPlan Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsSubPlan, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
@@ -406,7 +433,7 @@ func GetGroupsSubPlan(existingGroupId int64, currentToken string) ([]*models.Gro
 	return items, nil
 }
 
-func GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroupId int64, currentToken string) ([]*models.GroupsDynamicEnrollmentPharmacyDaysHours, error) {
+func GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroupId int64, currentToken string) (items []*models.GroupsDynamicEnrollmentPharmacyDaysHours, err error) {
 
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdynamicenrollmentpharmacydayshours", existingGroupId), nil)
@@ -422,14 +449,17 @@ func GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroupId int64, currentT
 
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+		if resp.StatusCode == http.StatusNotFound {
+			return items, nil
+		}
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, errors.New(fmt.Sprintf("GetGroupsDynamicEnrollmentPharmacyDaysHours Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
 	bodyData, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return nil, err
 	}
-	items := make([]*models.GroupsDynamicEnrollmentPharmacyDaysHours, 0)
 	err = json.Unmarshal(bodyData, &items)
 	if err != nil {
 		log.Fatalln(err)
