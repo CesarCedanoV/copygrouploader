@@ -19,7 +19,7 @@ func main() {
 
 	response := LoaderResponse{}
 
-	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE2OjI3OjEx"
+	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE4OjA0OjEx"
 
 	excelFileName := "groups_to_copy_cesar.xlsx"
 	xlFile, err := xlsx.OpenFile(excelFileName)
@@ -32,6 +32,39 @@ func main() {
 		existing_group_num := strings.Trim(sheet.Rows[1].Cells[0].Value, " ")
 
 		existingGroup, err := GetGroupsByQuery(existing_group_num, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		existingGroup.GroupsLocation, err = GetGroupsLocation(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsPlanList, err = GetGroupsPlanList(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsPriorAuth, err = GetGroupsPriorAuth(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsDedCapMgmt, err = GetGroupsDedCapMgmt(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsClaimAdminList, err = GetGroupsClaimAdminList(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsClaimAdminFeeList, err = GetGroupsClaimAdminFeeList(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsSubPlan, err = GetGroupsSubPlan(existingGroup.Id, currentToken)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		existingGroup.GroupsDynamicEnrollmentPharmacyDaysHours, err = GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroup.Id, currentToken)
 		if err != nil {
 			log.Fatalln(err)
 		}
@@ -140,4 +173,268 @@ type LoaderResponse struct {
 	TotalAdded  int64
 	RowsFailed  []int64
 	TotalFailed int64
+}
+
+func GetGroupsLocation(existingGroupId int64, currentToken string) ([]*models.GroupsLocation, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupslocation", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsLocation, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsPlanList(existingGroupId int64, currentToken string) ([]*models.GroupsPlanList, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsplanlist", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsPlanList, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsPriorAuth(existingGroupId int64, currentToken string) ([]*models.GroupsPriorAuth, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupspriorauth", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsPriorAuth, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) ([]*models.GroupsDedCapMgmt, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdedcapmgmt", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsDedCapMgmt, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) ([]*models.GroupsClaimAdminList, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminlist", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsClaimAdminList, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) ([]*models.GroupsClaimAdminFeeList, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminfeelist", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsClaimAdminFeeList, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsSubPlan(existingGroupId int64, currentToken string) ([]*models.GroupsSubPlan, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupssubplan", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsSubPlan, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroupId int64, currentToken string) ([]*models.GroupsDynamicEnrollmentPharmacyDaysHours, error) {
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdynamicenrollmentpharmacydayshours", existingGroupId), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Authorization", currentToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New(fmt.Sprintf("Error: {\"status_code\": %d}", resp.StatusCode))
+	}
+	bodyData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+	items := make([]*models.GroupsDynamicEnrollmentPharmacyDaysHours, 0)
+	err = json.Unmarshal(bodyData, &items)
+	if err != nil {
+		log.Fatalln(err)
+		return nil, err
+	}
+
+	return items, nil
 }
