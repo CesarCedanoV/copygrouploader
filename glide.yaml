@@ -1,0 +1,4 @@
+package: git.tredium.com/scm/copygrouploader
+import:
+- package: github.com/tealeg/xlsx
+  version: v1.0.3

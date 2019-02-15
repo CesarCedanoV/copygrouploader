@@ -1,0 +1,6 @@
+hash: 4a483f50b3a3b68253fd631ddd026b16a47f7f7d1455c4baeac953d264203527
+updated: 2019-02-15T11:04:06.189780217-04:00
+imports:
+- name: github.com/tealeg/xlsx
+  version: 8be35264fa75a1bbe954ce51eba04f273e2c59e5
+testImports: []

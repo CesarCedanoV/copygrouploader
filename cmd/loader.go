@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -19,10 +20,11 @@ func main() {
 
 	response := LoaderResponse{}
 
-	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE0VDE5OjUzOjMw"
+	currentToken := "Bearer Q0NFREFOT0BDUkVTVFZJRVdDLkNPTX4yMDE5LTAyLTE1VDE1OjU5OjMz"
 
-	excelFileName := "groups_to_copy.xlsx"
+	excelFileName := "../groups_to_copy.xlsx"
 	xlFile, err := xlsx.OpenFile(excelFileName)
+	poolSize := 50
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -68,36 +70,98 @@ func main() {
 			log.Fatalln(err)
 		}
 
-		for key, row := range sheet.Rows {
-			// Omit first row about the Table Headers
-			if key == 0 {
-				continue
+		min := func(a, b int) int {
+			if a > b {
+				return b
 			}
 
-			newGroup := existingGroup
-			newGroup.GroupNum = strings.Trim(row.Cells[1].Value, " ")
-			newGroup.GroupName = strings.Trim(row.Cells[2].Value, " ")
-			start_date, err := time.Parse("20060102", strings.Trim(row.Cells[3].Value, " "))
-			if err != nil {
-				response.RowsFailed = append(response.RowsFailed, int64(key+1))
-				response.TotalFailed++
-				fmt.Println("In row:", (key + 1), "TimeParse Error:", err)
-				continue
-			}
-			newGroup.StartDate = start_date
+			return a
+		}
+		ch := make(chan bool)
+		sheet.Rows = sheet.Rows[1:100]
+		l := int(math.Ceil(float64(len(sheet.Rows)) / float64(poolSize)))
+		for i := 0; i < l; i++ {
+			start := i * poolSize
+			end := min((i+1)*poolSize, len(sheet.Rows))
+			responses := 0
+			chunk := sheet.Rows[start:end]
 
-			err = AddGroup(*newGroup, currentToken)
-			if err != nil {
-				response.RowsFailed = append(response.RowsFailed, int64(key+1))
-				response.TotalFailed++
-				fmt.Println("In row:", (key + 1), err)
-				continue
-			}
+			for index, row := range chunk {
+				go func(index int, row *xlsx.Row, response *LoaderResponse) {
+					key := start + index
+					fmt.Println("Start Process in Row ", key+1, ".")
+					newGroup := existingGroup
+					newGroup.GroupNum = strings.Trim(row.Cells[1].Value, " ")
+					newGroup.GroupName = strings.Trim(row.Cells[2].Value, " ")
+					startDate, err := time.Parse("20060102", strings.Trim(row.Cells[3].Value, " "))
+					if err != nil {
+						response.RowsFailed = append(response.RowsFailed, int64(key+1))
+						response.TotalFailed++
+						fmt.Println("In row:", (key + 1), "TimeParse Error:", err)
+						ch <- true
+					}
+					newGroup.StartDate = startDate
 
-			response.RowsAdded = append(response.RowsAdded, int64(key+1))
-			response.TotalAdded++
+					err = AddGroup(*newGroup, currentToken)
+					if err != nil {
+						response.RowsFailed = append(response.RowsFailed, int64(key+1))
+						response.TotalFailed++
+						fmt.Println("In row:", (key + 1), err)
+						ch <- true
+					}
+
+					response.RowsAdded = append(response.RowsAdded, int64(key+1))
+					response.TotalAdded++
+
+					ch <- true
+				}(index, row, &response)
+			}
+			isBreak := false
+			for {
+				if isBreak {
+					break
+				}
+				select {
+				case <-ch:
+					responses++
+					if responses >= end-start {
+						isBreak = true
+					}
+				}
+			}
 
 		}
+
+		// for key, row := range sheet.Rows {
+		// 	// Omit first row about the Table Headers
+		// 	if key == 0 {
+		// 		continue
+		// 	}
+
+		// 	newGroup := existingGroup
+		// 	newGroup.GroupNum = strings.Trim(row.Cells[1].Value, " ")
+		// 	newGroup.GroupName = strings.Trim(row.Cells[2].Value, " ")
+		// 	startDate, err := time.Parse("20060102", strings.Trim(row.Cells[3].Value, " "))
+		// 	if err != nil {
+		// 		response.RowsFailed = append(response.RowsFailed, int64(key+1))
+		// 		response.TotalFailed++
+		// 		fmt.Println("In row:", (key + 1), "TimeParse Error:", err)
+		// 		continue
+		// 	}
+		// 	newGroup.StartDate = startDate
+
+		// 	err = AddGroup(*newGroup, currentToken)
+		// 	if err != nil {
+		// 		response.RowsFailed = append(response.RowsFailed, int64(key+1))
+		// 		response.TotalFailed++
+		// 		fmt.Println("In row:", (key + 1), err)
+		// 		continue
+		// 	}
+
+		// 	response.RowsAdded = append(response.RowsAdded, int64(key+1))
+		// 	response.TotalAdded++
+
+		// }
 	}
 	log.Println("Response:", response)
 }
@@ -106,7 +170,7 @@ func GetGroupsByQuery(existingGroupNum string, currentToken string) (*models.Gro
 
 	client := &http.Client{}
 	dto, _ := json.Marshal(map[string]interface{}{"groups_group_num": existingGroupNum})
-	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/query", bytes.NewReader(dto))
+	req, err := http.NewRequest("POST", "https://scl-pharm-dev.tredium.com/api/plan-svc/groups/query", bytes.NewReader(dto))
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +212,7 @@ func AddGroup(group models.Groups, currentToken string) error {
 
 	client := &http.Client{}
 	dto, _ := json.Marshal(group)
-	req, err := http.NewRequest("POST", "https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/", bytes.NewReader(dto))
+	req, err := http.NewRequest("POST", "https://scl-pharm-dev.tredium.com/api/plan-svc/groups/", bytes.NewReader(dto))
 	if err != nil {
 		return err
 	}
@@ -164,12 +228,11 @@ func AddGroup(group models.Groups, currentToken string) error {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
 		return errors.New(fmt.Sprintf("AddGroup Error: \n{\n\"status_code\": %d,\n\"body\": %s\n}\n", resp.StatusCode, string(bodyBytes)))
 	}
-	bodyData, err := ioutil.ReadAll(resp.Body)
+	_, err = ioutil.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatalln(err)
 		return err
 	}
-	fmt.Println(string(bodyData))
 
 	return nil
 }
@@ -184,7 +247,7 @@ type LoaderResponse struct {
 func GetGroupsLocation(existingGroupId int64, currentToken string) (items []*models.GroupsLocation, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupslocation", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupslocation", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +283,7 @@ func GetGroupsLocation(existingGroupId int64, currentToken string) (items []*mod
 func GetGroupsPlanList(existingGroupId int64, currentToken string) (items []*models.GroupsPlanList, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsplanlist", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupsplanlist", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +319,7 @@ func GetGroupsPlanList(existingGroupId int64, currentToken string) (items []*mod
 func GetGroupsPriorAuth(existingGroupId int64, currentToken string) (items []*models.GroupsPriorAuth, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupspriorauth", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupspriorauth", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +355,7 @@ func GetGroupsPriorAuth(existingGroupId int64, currentToken string) (items []*mo
 func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) (items []*models.GroupsDedCapMgmt, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdedcapmgmt", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupsdedcapmgmt", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +391,7 @@ func GetGroupsDedCapMgmt(existingGroupId int64, currentToken string) (items []*m
 func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) (items []*models.GroupsClaimAdminList, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminlist", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupsclaimadminlist", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -364,7 +427,7 @@ func GetGroupsClaimAdminList(existingGroupId int64, currentToken string) (items 
 func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) (items []*models.GroupsClaimAdminFeeList, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsclaimadminfeelist", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupsclaimadminfeelist", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +463,7 @@ func GetGroupsClaimAdminFeeList(existingGroupId int64, currentToken string) (ite
 func GetGroupsSubPlan(existingGroupId int64, currentToken string) (items []*models.GroupsSubPlan, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupssubplan", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupssubplan", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +499,7 @@ func GetGroupsSubPlan(existingGroupId int64, currentToken string) (items []*mode
 func GetGroupsDynamicEnrollmentPharmacyDaysHours(existingGroupId int64, currentToken string) (items []*models.GroupsDynamicEnrollmentPharmacyDaysHours, err error) {
 
 	client := &http.Client{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("https://pmt-pharm-uat.tredium.com/api/plan-svc/groups/%d/groupsdynamicenrollmentpharmacydayshours", existingGroupId), nil)
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://scl-pharm-dev.tredium.com/api/plan-svc/groups/%d/groupsdynamicenrollmentpharmacydayshours", existingGroupId), nil)
 	if err != nil {
 		return nil, err
 	}
